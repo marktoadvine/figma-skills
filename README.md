@@ -1,6 +1,6 @@
 # helpful-skills
 
-Some agentic skills for design systems, to help aid my Figma design processes inside web and apps.
+Some agentic skills for design systems which I use every day, to help aid you in your Figma design processes inside web and apps.
 
 ## Skills
 
@@ -16,9 +16,9 @@ Each skill is a **single self-contained `.md` file** under `skills/`, following 
 To use one in Figma, upload it to the Figma agent or Figma Make: drag the `.md` file in, or
 click **Upload a file** and pick it. Figma's custom skills do not support the optional
 `scripts/`, `references/`, or `assets/` directories that agent skills sometimes ship with,
-which is why everything here stays in one file — any script a skill needs is inlined.
+which is why everything here stays in one file, any script a skill needs is inlined.
 
-The same files also work in an MCP client such as Claude Code or Cursor: drop one into
+The same files also work in an MCP client such as Claude Code or Cursor (though, these havent been fully tested; the main usecase for these is in Figma's native agent): drop one into
 `.claude/skills/<name>/SKILL.md`.
 
 These skills drive Figma through the `use_figma` tool, and expect `figma-use` to be passed
