@@ -1,6 +1,6 @@
 # helpful-skills
 
-Some agentic skills for design systems which I use every day, to help aid you in your Figma design processes inside web and apps.
+Figma-agentic skills for design systems to help aid you in your Figma-native design processes.
 
 ## Skills
 
