@@ -100,31 +100,53 @@ Do not read variables here. Keys obtained by reading a file directly fail on
 const sel = figma.currentPage.selection;
 if (!sel.length) return { error: 'Select the frame(s) to migrate.' };
 const LAYOUT = ['itemSpacing','counterAxisSpacing','paddingTop','paddingBottom','paddingLeft',
-  'paddingRight','topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius','strokeWeight'];
-const STYLES = ['fillStyleId','strokeStyleId','effectStyleId','textStyleId'];
+  'paddingRight','cornerRadius','topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius',
+  'minWidth','maxWidth','minHeight','maxHeight','gridRowGap','gridColumnGap',
+  'strokeWeight','strokeTopWeight','strokeRightWeight','strokeBottomWeight','strokeLeftWeight'];
+const TEXTV = ['fontFamily','fontSize','fontStyle','fontWeight','letterSpacing','lineHeight',
+  'paragraphSpacing','paragraphIndent'];
+const STYLES = ['strokeStyleId','effectStyleId','textStyleId']; // fillStyleId handled per-range below
 const vc = new Map(), sc = new Map();
 const gv = async id => { if (!vc.has(id)) vc.set(id, await figma.variables.getVariableByIdAsync(id).catch(() => null)); return vc.get(id); };
 const gs = async id => { if (!sc.has(id)) sc.set(id, await figma.getStyleByIdAsync(id).catch(() => null)); return sc.get(id); };
-const out = { colorVars: {}, layoutVars: {}, styles: {}, unstyledText: [], localInstances: {} };
+const out = { colorVars: {}, layoutVars: {}, textVars: {}, styles: {}, unstyledText: [], localInstances: {} };
 const put = (b, k, e) => { (b[k] = b[k] || []).push(e); };
+const localVar = async (id, bucket, entry) => { const v = await gv(id); if (v && !v.remote) put(bucket, v.name, entry); };
+const localStyle = async (id, entry) => { const s = await gs(id); if (s && !s.remote) put(out.styles, s.name, entry); };
 const nodes = [];
-for (const r of sel) { nodes.push(r); if (r.findAll) nodes.push(...r.findAll(() => true)); }
+// Push in a loop: `push(...findAll())` throws RangeError once the subtree is large enough.
+for (const r of sel) { nodes.push(r); if (r.findAll) for (const d of r.findAll(() => true)) nodes.push(d); }
 for (const n of nodes) {
   const w = { node: n.name, id: n.id, type: n.type };
-  for (const p of ['fills', 'strokes']) {
-    if (!Array.isArray(n[p])) continue; // also filters figma.mixed
-    for (const paint of n[p]) {
+  const bv = n.boundVariables || {};
+  // Fills: TEXT is read per styled segment. A node with per-range fills returns figma.mixed
+  // for `fills`/`fillStyleId`, hiding every binding inside it from a plain array read.
+  const fillSets = n.type === 'TEXT'
+    ? n.getStyledTextSegments(['fills', 'fillStyleId']).map(s => ({ paints: s.fills, styleId: s.fillStyleId, at: `[${s.start}-${s.end}]` }))
+    : [{ paints: Array.isArray(n.fills) ? n.fills : [], styleId: n.fillStyleId, at: '' }];
+  for (const set of fillSets) {
+    for (const paint of set.paints || []) {
       const b = paint.boundVariables && paint.boundVariables.color;
-      if (b) { const v = await gv(b.id); if (v && !v.remote) put(out.colorVars, v.name, { ...w, prop: p }); }
+      if (b) await localVar(b.id, out.colorVars, { ...w, prop: `fills${set.at}` });
+      for (const stop of paint.gradientStops || []) {           // gradient stops bind separately
+        const g = stop.boundVariables && stop.boundVariables.color;
+        if (g) await localVar(g.id, out.colorVars, { ...w, prop: `fills${set.at}/stop` });
+      }
     }
+    if (typeof set.styleId === 'string' && set.styleId) await localStyle(set.styleId, { ...w, field: `fillStyleId${set.at}` });
   }
-  for (const f of LAYOUT) {
-    const ref = (n.boundVariables || {})[f];
-    if (ref) { const v = await gv(ref.id); if (v && !v.remote) put(out.layoutVars, v.name, { ...w, field: f }); }
+  for (const paint of Array.isArray(n.strokes) ? n.strokes : []) {
+    const b = paint.boundVariables && paint.boundVariables.color;
+    if (b) await localVar(b.id, out.colorVars, { ...w, prop: 'strokes' });
   }
+  for (const f of LAYOUT) if (bv[f]) await localVar(bv[f].id, out.layoutVars, { ...w, field: f });
+  // Text fields bind to an ARRAY of aliases, one per styled range — not a single alias.
+  for (const f of TEXTV) for (const ref of bv[f] || []) await localVar(ref.id, out.textVars, { ...w, field: f });
+  for (const [prop, ref] of Object.entries(bv.componentProperties || {}))
+    await localVar(ref.id, out.layoutVars, { ...w, field: `componentProperties/${prop}` });
   for (const f of STYLES) {
     const id = n[f];
-    if (typeof id === 'string' && id) { const s = await gs(id); if (s && !s.remote) put(out.styles, s.name, { ...w, field: f }); }
+    if (typeof id === 'string' && id) await localStyle(id, { ...w, field: f });
   }
   if (n.type === 'TEXT' && n.textStyleId === '') {
     const mixed = n.fontName === figma.mixed;
@@ -139,7 +161,8 @@ for (const n of nodes) {
 }
 const c = o => Object.keys(o).length;
 out.summary = { scanned: nodes.length, colorVars: c(out.colorVars), layoutVars: c(out.layoutVars),
-  styles: c(out.styles), unstyledText: out.unstyledText.length, instances: c(out.localInstances) };
+  textVars: c(out.textVars), styles: c(out.styles), unstyledText: out.unstyledText.length,
+  instances: c(out.localInstances) };
 out.summary.clean = Object.values(out.summary).slice(1).every(v => v === 0);
 return out;
 ```
@@ -168,7 +191,7 @@ async function resolve(value, modeId) {
   while (value && value.type === 'VARIABLE_ALIAS' && guard++ < 10) {
     const t = await figma.variables.getVariableByIdAsync(value.id); if (!t) return null;
     const coll = await figma.variables.getVariableCollectionByIdAsync(t.variableCollectionId);
-    value = t.valuesByMode[modeId] || t.valuesByMode[coll.defaultModeId];
+    value = modeId in t.valuesByMode ? t.valuesByMode[modeId] : t.valuesByMode[coll.defaultModeId];
   }
   return value;
 }
@@ -196,6 +219,10 @@ different things in different orders. With variable fonts `style` may read `Regu
 sides while numeric weights differ; text *nodes* expose `fontWeight` and text *styles* don't,
 so use it as the tiebreak. No exact size match means a visual change, which this migration is
 not allowed to make — report it instead of applying the nearest.
+
+**Text variables** — a type ramp bound through `fontSize`/`lineHeight` variables matches on
+resolved number, exactly like the layout scale. Read the binding off the array `boundVariables`
+gives for text fields, and remember a single node can carry a different binding per range.
 
 **Components** — match sets by normalized name, then map variant properties by comparing
 option lists and what the variants actually render (`Color=Blue` is often `Color=Default`).
@@ -227,6 +254,12 @@ const fills = [...node.fills];
 fills[i] = figma.variables.setBoundVariableForPaint(fills[i], 'color', cv);
 node.fills = fills;
 
+// Text variables: whole node, or one styled range at a time
+const tv = await figma.variables.importVariableByKeyAsync(textKey);
+await figma.loadFontAsync(node.fontName);   // any text mutation needs the font loaded first
+node.setBoundVariable('fontSize', tv);
+node.setRangeBoundVariable(start, end, 'lineHeight', tv);  // per-range binding
+
 // Styles: keys read from the library file work directly, no teamLibrary needed
 const st = await figma.importStyleByKeyAsync(styleKey);
 await node.setTextStyleIdAsync(st.id); // also setFillStyleIdAsync, setEffectStyleIdAsync
@@ -243,11 +276,15 @@ text overrides are lost. Snapshot both, swap, then restore — sizing *after* th
 the swap overwrites it:
 
 ```js
-const snap = { layoutSizingHorizontal: inst.layoutSizingHorizontal, layoutSizingVertical: inst.layoutSizingVertical,
-  layoutAlign: inst.layoutAlign, layoutGrow: inst.layoutGrow, layoutPositioning: inst.layoutPositioning };
+// Key order is load-bearing: restore layoutPositioning FIRST. FILL is rejected on an
+// absolute-positioned child, so if the swap leaves the instance ABSOLUTE, restoring sizing
+// first drops it silently. Positioning-first costs nothing when the swap preserved AUTO.
+const snap = { layoutPositioning: inst.layoutPositioning, layoutAlign: inst.layoutAlign,
+  layoutGrow: inst.layoutGrow, layoutSizingHorizontal: inst.layoutSizingHorizontal,
+  layoutSizingVertical: inst.layoutSizingVertical };
 const texts = inst.findAll(n => n.type === 'TEXT').map(n => ({ name: n.name, characters: n.characters }));
-await inst.swapComponent(await figma.importComponentByKeyAsync(variantKey));
-Object.assign(inst, snap);
+inst.swapComponent(await figma.importComponentByKeyAsync(variantKey)); // sync — returns void
+for (const [k, v] of Object.entries(snap)) inst[k] = v;
 for (const n of inst.findAll(n => n.type === 'TEXT')) {
   const o = texts.find(t => t.name === n.name);
   if (o && o.characters !== n.characters) { await figma.loadFontAsync(n.fontName); n.characters = o.characters; }
@@ -267,6 +304,11 @@ are not.
 Re-run Step 3. `summary.clean` should be true, except for instances with no library
 equivalent and text nodes with mixed styling — both expected. Anything else means a step
 didn't take.
+
+`clean` only ever means "nothing local is still *bound*." A frame of raw hex fills and
+hardcoded spacing reports clean too, because there is no binding to find. If the selection
+started out largely untokenized, say so in the report — a migration cannot repoint a
+decision that was never expressed as a token.
 
 Then tell the user what was rebound by category and count, what had no equivalent and was
 deliberately left alone, and anything needing a human decision. A migration that quietly
@@ -296,3 +338,8 @@ makes the difference visible.
 | `findAllWithCriteria` finds nothing on other pages | Call `figma.loadAllPagesAsync()` first |
 | Empty library inventory | Wrong file key, or the key was ignored — check `figma.root.name` |
 | Style id reads as `figma.mixed` | Values differ across children or ranges — guard with `typeof id === 'string'` |
+| Spacing or radius maps to the wrong token | `valuesByMode[mode] \|\| default` — a legitimate `0` is falsy and falls through to the default mode |
+| Instance still mis-sized after the restore | `layoutPositioning` restored after sizing; `FILL` is rejected on an absolute-positioned child |
+| `RangeError: Maximum call stack size exceeded` | `push(...findAll())` on a large subtree — push in a loop instead |
+| Text node reports no bindings at all | Per-range fills read as `figma.mixed` — read `getStyledTextSegments`, not `node.fills` |
+| Text variable binding reads as `undefined` | Text fields bind to a `VariableAlias[]`, one per range — not a single alias |
