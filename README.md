@@ -1,4 +1,4 @@
-# helpful-skills
+# fig-skills
 
 Figma-agentic skills for design systems to help aid you in your Figma-native design processes.
 
@@ -6,6 +6,7 @@ Figma-agentic skills for design systems to help aid you in your Figma-native des
 
 | Skill | What it does |
 |---|---|
+| [`better-accessibility`](skills/better-accessibility.md) | Audits a selected frame, component, or multi-screen user flow against WCAG 2.2 AA with measured values, marks up the canvas with annotated fixes, and emits a `.pa11yci` config so the criteria a static design can't prove get verified in CI. |
 | [`migrate-library`](skills/migrate-library.md) | Relinks a Figma selection's styles, variables, tokens, and component instances onto a different published library, without changing how anything looks. |
 
 ## Using a skill
