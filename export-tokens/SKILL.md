@@ -157,3 +157,7 @@ Before the code blocks, include a short summary:
 - Number excluded by filtering rules
 
 Also write the files to the code directory so they persist for the next run's diff comparison.
+
+---
+
+Credit: Originally written by @marktoadvine (Mark Toadvine)

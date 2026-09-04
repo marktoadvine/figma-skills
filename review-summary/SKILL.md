@@ -63,3 +63,7 @@ Take a screenshot of the dashboard frame using `await node.screenshot()` and ins
 - The header stat counts match the actual number of items in each section
 
 If any section looks broken or misaligned, re-run the layout fix from Step 4 targeting only the affected rows before responding.
+
+---
+
+Credit: Originally written by @marktoadvine (Mark Toadvine)

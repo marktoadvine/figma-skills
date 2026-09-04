@@ -343,3 +343,7 @@ makes the difference visible.
 | `RangeError: Maximum call stack size exceeded` | `push(...findAll())` on a large subtree — push in a loop instead |
 | Text node reports no bindings at all | Per-range fills read as `figma.mixed` — read `getStyledTextSegments`, not `node.fills` |
 | Text variable binding reads as `undefined` | Text fields bind to a `VariableAlias[]`, one per range — not a single alias |
+
+---
+
+Credit: Originally written by @marktoadvine (Mark Toadvine)

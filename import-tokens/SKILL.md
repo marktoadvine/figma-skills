@@ -234,3 +234,7 @@ No tokens were removed. 2 existing tokens were not in the import file and were k
 **Large imports**: For files with 200+ tokens, batch the `evaluate_script` calls to avoid timeouts. Process in chunks of ~50 variables per call.
 
 **rem to px**: Convert rem values using `1rem = 16px` unless the user specifies a different base.
+
+---
+
+Credit: Originally written by @marktoadvine (Mark Toadvine)
