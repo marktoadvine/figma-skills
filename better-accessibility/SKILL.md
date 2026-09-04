@@ -377,6 +377,6 @@ map the result.
   mapping is required rather than guessing. String-length expansion is a compliance issue
   here, not a layout nicety.
 
-## Credit
+---
 
-Written by Mark Toadvine (@marktoadvine) for Figma agents, inspired by original work done by jakubkrehel/skills.
+Credit: Originally written by @marktoadvine (Mark Toadvine) for Figma agents, inspired by original work done by jakubkrehel/skills.
