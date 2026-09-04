@@ -7,6 +7,10 @@ description: Import design tokens from a JSON, JS, or config file (tokens.json, 
 
 Import design tokens from a user-provided file into the current Figma file as local variables and text/color/effect styles. Supports fresh imports into empty files and incremental updates to existing variable systems.
 
+Run all scripts through `use_figma`, with `figma-use` in the `skillNames` parameter. Code is
+auto-wrapped in an async context — use top-level `await` and `return` explicitly, since
+only the returned value is visible and `console.log` is not.
+
 ---
 
 ## Supported Input Formats
@@ -60,7 +64,7 @@ Read the file the user provided (pasted inline or attached). Normalize all token
 
 ## Step 2: Inventory existing variables
 
-Use `evaluate_script` to read the current file's local variables and collections:
+Use `use_figma` to read the current file's local variables and collections:
 
 ```js
 const collections = await figma.variables.getLocalVariableCollectionsAsync();
@@ -71,8 +75,8 @@ Build a lookup map of `collectionName + "/" + variableName` → variable object,
 
 Also read existing local paint styles and text styles for the style-creation step:
 ```js
-const paintStyles = figma.getLocalPaintStyles();
-const textStyles = figma.getLocalTextStyles();
+const paintStyles = await figma.getLocalPaintStylesAsync();
+const textStyles = await figma.getLocalTextStylesAsync();
 ```
 
 ---
@@ -146,9 +150,10 @@ variable.setValueForMode(modeId, { type: "VARIABLE_ALIAS", id: targetVariable.id
 variable.scopes = ["CORNER_RADIUS"]; // or ["ALL_SCOPES"], ["WIDTH_HEIGHT", "GAP"], etc.
 ```
 
-**Setting code syntax** (if provided):
+**Setting code syntax** (if provided). `codeSyntax` is read-only — assigning to it throws,
+so use the setter, one platform per call (`'WEB'`, `'ANDROID'`, `'iOS'`):
 ```js
-variable.codeSyntax = { WEB: "var(--token-name)" };
+variable.setVariableCodeSyntax("WEB", "var(--token-name)");
 ```
 
 ---
@@ -170,13 +175,18 @@ style.paints = [paint];
 ```
 
 **Text styles** — if typography tokens include fontSize + fontFamily + fontWeight combos, create text styles:
+A `TextStyle` has no `fontWeight` and no `setFontNameAsync` — weight travels inside
+`fontName.style`, and the font must be loaded before it is assigned:
 ```js
+const fontName = { family: "Season Sans", style: "Regular" }; // 400 → "Regular", 700 → "Bold"
+await figma.loadFontAsync(fontName);        // throws later if skipped
 const style = figma.createTextStyle();
 style.name = "Body/text-sans-16-400";
-await style.setFontNameAsync({ family: "Season Sans", style: "Regular" });
+style.fontName = fontName;
 style.fontSize = 16;
-style.fontWeight = 400; // if supported, otherwise match via font style string
 ```
+Map numeric weights to style names via `figma.listAvailableFontsAsync()` rather than
+guessing — `"SemiBold"` and `"Semi Bold"` are both real and not interchangeable.
 
 For existing styles with the same name, update their values instead of creating duplicates.
 
@@ -231,7 +241,7 @@ No tokens were removed. 2 existing tokens were not in the import file and were k
 
 **Font availability**: When creating text styles, wrap font loading in try/catch. If a font isn't available, warn the user but still create the style with the closest available font.
 
-**Large imports**: For files with 200+ tokens, batch the `evaluate_script` calls to avoid timeouts. Process in chunks of ~50 variables per call.
+**Large imports**: For files with 200+ tokens, batch the `use_figma` calls to avoid timeouts. Process in chunks of ~50 variables per call.
 
 **rem to px**: Convert rem values using `1rem = 16px` unless the user specifies a different base.
 

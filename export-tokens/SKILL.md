@@ -10,7 +10,11 @@ Export all local variable collections from the current Figma file as three outpu
 2. **`tailwind.config.js`** — Tailwind CSS config with all aliases resolved to hex, versioned in a header comment
 3. **`CHANGELOG.md`** — a diff summary showing what changed since the last export
 
-All three outputs MUST be pasted **inline in the chat response** inside code blocks so the user can copy/paste or download. Also write them to the code directory as a secondary convenience, but the inline paste is the primary delivery.
+Run all scripts through `use_figma`, with `figma-use` in the `skillNames` parameter. Code is
+auto-wrapped in an async context — use top-level `await` and `return` explicitly, since
+only the returned value is visible and `console.log` is not.
+
+All three outputs MUST be pasted **inline in the chat response** inside code blocks so the user can copy/paste or download. Where the environment has a filesystem, also write them to the code directory as a secondary convenience — Figma's agent does not, so the inline paste is the primary delivery and the only one that always works.
 
 ---
 
@@ -25,15 +29,15 @@ Automatically exclude variables and collections that match any of these criteria
 
 ## Step 1: Read the previous export (if any)
 
-Before extracting fresh data, check whether a previous `tokens.json` already exists in the code directory. If it does:
+Before extracting fresh data, look for a previous `tokens.json` — in the code directory where there is a filesystem, otherwise ask the user to paste the one from their last run. If you have it:
 - Read it and parse the `$version` field (e.g. `"0.1.3"`)
 - Keep the full previous token tree in memory for diffing in Step 5
 
-If no previous file exists, this is the first export — start at version `0.1.0`.
+If no previous file exists, or the user has none to paste, this is the first export — start at version `0.1.0`.
 
 ## Step 2: Extract variables via Plugin API
 
-Use `evaluate_script` to read all local variable collections and variables:
+Use `use_figma` to read all local variable collections and variables:
 
 - Use `figma.variables.getLocalVariableCollectionsAsync()` and `figma.variables.getLocalVariablesAsync()`
 - For each collection, check `collection.hiddenFromPublishing` — skip the entire collection if true
