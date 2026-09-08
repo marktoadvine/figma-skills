@@ -1,166 +1,191 @@
 ---
 name: export-tokens
-description: Export all published local variable collections from the current Figma file as a versioned DTCG tokens.json and tailwind.config.js. Detects changes from previous exports, bumps the version, generates a diff summary, and presents all files inline in chat for copy/paste.
+description: Export the published local variable collections from the current Figma file as spec-correct DTCG tokens.json, a Tailwind v4 @theme stylesheet, and a versioned changelog. Detects changes since the last export, bumps the version, and presents every file inline in chat for copy/paste.
 ---
 
 # Export Design Tokens
 
-Export all local variable collections from the current Figma file as three outputs:
-1. **`tokens.json`** — DTCG (Design Tokens Community Group) format with a `$version` field
-2. **`tailwind.config.js`** — Tailwind CSS config with all aliases resolved to hex, versioned in a header comment
-3. **`CHANGELOG.md`** — a diff summary showing what changed since the last export
+Turn the current Figma file's local variables into three outputs:
+
+1. **`tokens.json`** — [DTCG](https://www.designtokens.org/tr/drafts/format/) 2025.10, the source of truth
+2. **`theme.css`** — a Tailwind v4 `@theme` block generated from those tokens
+3. **`CHANGELOG.md`** — what changed since the last export
 
 Run all scripts through `use_figma`, with `figma-use` in the `skillNames` parameter. Code is
-auto-wrapped in an async context — use top-level `await` and `return` explicitly, since
-only the returned value is visible and `console.log` is not.
+auto-wrapped in an async context — use top-level `await` and `return` explicitly, since only
+the returned value is visible and `console.log` is not.
 
-All three outputs MUST be pasted **inline in the chat response** inside code blocks so the user can copy/paste or download. Where the environment has a filesystem, also write them to the code directory as a secondary convenience — Figma's agent does not, so the inline paste is the primary delivery and the only one that always works.
+Paste every output **inline in the chat** inside fenced code blocks. Where the environment
+has a filesystem, also write them to the code directory; Figma's agent has none, so the
+inline paste is the only delivery that always works.
 
----
+## Two rules that govern everything
 
-## Exclusion Rules
+**Never invent a value.** Every number, colour, and curve in the output comes from a
+variable that exists in the file. Do not derive line heights from font sizes, do not
+synthesise shadows from a depth scale, do not add fallback fonts that nobody chose. If a
+value the target format wants is missing, omit the key and say so in the summary — a gap is
+recoverable, a fabricated value silently becomes someone's design system.
 
-Automatically exclude variables and collections that match any of these criteria:
-- **Unpublished**: `hiddenFromPublishing === true` on the variable
-- **Private by naming convention**: The variable name OR any segment of its `/`-delimited path starts with `.` or `_` (e.g. `.primitives`, `_internal/spacing`, `utilities/_component-background`)
-- **Unpublished collections**: Skip entire collections where `hiddenFromPublishing === true` on the collection itself
+**Never flatten an alias.** A semantic token pointing at a primitive stays a reference: a
+DTCG alias in `tokens.json`, a `var()` in `theme.css`. Resolving `color/text/link` down to
+`#1d5a85` throws away the relationship that makes theming and dark mode possible.
 
----
+## Exclusions
 
-## Step 1: Read the previous export (if any)
+Skip any collection with `hiddenFromPublishing === true`, any variable with
+`hiddenFromPublishing === true`, and any variable whose name has a `/`-segment starting with
+`.` or `_` (`.primitives`, `_internal/spacing`, `utilities/_component-background`).
 
-Before extracting fresh data, look for a previous `tokens.json` — in the code directory where there is a filesystem, otherwise ask the user to paste the one from their last run. If you have it:
-- Read it and parse the `$version` field (e.g. `"0.1.3"`)
-- Keep the full previous token tree in memory for diffing in Step 5
+## Step 1 — Find the previous export
 
-If no previous file exists, or the user has none to paste, this is the first export — start at version `0.1.0`.
+Look for a previous `tokens.json`: in the code directory where there is a filesystem,
+otherwise ask the user to paste last run's file. Read its version from
+`$extensions["com.figma.export"].version` and keep the token tree for diffing. No previous
+file, or none to paste → this is the first export, version `0.1.0`.
 
-## Step 2: Extract variables via Plugin API
+## Step 2 — Read the variables
 
-Use `use_figma` to read all local variable collections and variables:
+```js
+const collections = await figma.variables.getLocalVariableCollectionsAsync();
+const variables = await figma.variables.getLocalVariablesAsync();
+```
 
-- Use `figma.variables.getLocalVariableCollectionsAsync()` and `figma.variables.getLocalVariablesAsync()`
-- For each collection, check `collection.hiddenFromPublishing` — skip the entire collection if true
-- For each variable, check:
-  - `variable.hiddenFromPublishing` — skip if true
-  - `variable.name` — split by `/` and skip if any segment starts with `.` or `_`
-- For each included variable, read the value from the first mode of its collection
-- Convert Figma normalized RGB colors (0-1 floats) to hex strings, including alpha channel when `a !== 1`
-- For alias values (`VARIABLE_ALIAS` type), resolve the alias reference using `figma.variables.getVariableByIdAsync()`
-- For cubic bezier easing values (`CUSTOM_CUBIC_BEZIER` type), extract the control points
-- For duration values (FLOAT type in the motion collection), convert from seconds to milliseconds and append "ms"
-- Include `$extensions` with `com.figma.codeSyntax` when present on variables
-- Include `$extensions` with `com.figma.scopes` when not ALL_SCOPES
-- Build a primitive color lookup table from all COLOR type variables for resolving semantic aliases to hex
+For each surviving variable read the value from its collection's **first mode**, and record
+`name`, `resolvedType`, `scopes`, `codeSyntax`, and the collection name. Resolve
+`VARIABLE_ALIAS` values to the *target's name* — not its value — with
+`figma.variables.getVariableByIdAsync()`. Convert colours from Figma's 0–1 floats to hex,
+appending the alpha pair only when `a !== 1`.
 
-## Step 3: Compute version bump
+**Sanitise names before anything else.** DTCG forbids `.`, `{`, `}` and `$` in token and
+group names, because `.` is the path separator inside a `{alias.reference}`. A Figma
+variable called `space.4` produces an unresolvable alias. Replace those characters with `-`
+and report every rename in the summary.
 
-Compare the new token data against the previous export from Step 1:
+## Step 3 — Map Figma types to DTCG types
 
-- **No previous export** → set version to `0.1.0`
-- **No changes detected** → keep the same version and tell the user everything is up to date (still output the files)
-- **Changes detected** → bump the patch version (e.g. `0.1.3` → `0.1.4`)
+This is where a generic export goes wrong. Figma has four resolved types; DTCG has thirteen,
+and the difference is what makes downstream tooling able to do anything useful. Decide by
+`scopes` first — they are declared intent — and fall back to the name path.
 
-The version format is `MAJOR.MINOR.PATCH`:
-- PATCH: any token value changed, token added, or token removed
-- MINOR: a whole collection added or removed (bump minor, reset patch to 0)
-- MAJOR: reserved for the user to bump manually
+| Figma | Condition | `$type` | `$value` |
+|---|---|---|---|
+| `COLOR` | — | `color` | `"#1d5a85"` |
+| `FLOAT` | scope `WIDTH_HEIGHT` / `GAP` / `CORNER_RADIUS` / `STROKE_FLOAT`, or path names a size, space, radius, stroke or blur | `dimension` | `{ "value": 16, "unit": "px" }` |
+| `FLOAT` | path names a font size | `dimension` | `{ "value": 16, "unit": "px" }` |
+| `FLOAT` | path names a duration | `duration` | `{ "value": 150, "unit": "ms" }` |
+| `FLOAT` | path names a font weight | `fontWeight` | `500` — a number in 1–1000, or a keyword like `"bold"` |
+| `FLOAT` | unitless ratio — line height, opacity | `number` | `1.5` |
+| `STRING` | path names a font family | `fontFamily` | `"Season Sans"`, or an array for a stack |
+| `BOOLEAN` | — | `boolean` | `true` |
+| easing | `CUSTOM_CUBIC_BEZIER` | `cubicBezier` | `[0.4, 0, 0.2, 1]` |
+| any | value is an alias | **omit `$type`** | `"{color.blue.600}"` |
 
-## Step 4: Build tokens.json
+`dimension` and `duration` values are **objects, not strings** — `"16px"` and `"150ms"` are
+from an older draft, and emitting them as `number` tokens holding strings is exactly what
+makes a generator produce garbage. A group may declare a `$type` its children inherit, which
+is the tidiest way to type a whole colour ramp at once. `string` and `boolean` sit outside
+the core thirteen types; emit them, but say so in the summary.
 
-Add a top-level `$version` field and `$generated` timestamp:
+## Step 4 — Build tokens.json
+
+Group by collection name, then split each variable name on `/` into nested groups. Export
+metadata lives in `$extensions` — the `$` prefix is reserved for spec properties, so a
+top-level `$version` is not valid DTCG:
+
 ```json
 {
-  "$version": "0.1.4",
-  "$generated": "2026-09-03T14:30:00Z",
-  "sizing": { ... },
-  "color": { ... },
-  ...
+  "$extensions": {
+    "com.figma.export": { "version": "0.1.4", "generated": "2026-09-08T14:30:00Z" }
+  },
+  "color": {
+    "blue": { "600": { "$type": "color", "$value": "#1d5a85" } },
+    "text": { "link": { "$value": "{color.blue.600}" } }
+  },
+  "sizing": {
+    "space": { "4": { "$type": "dimension", "$value": { "value": 16, "unit": "px" } } }
+  }
 }
 ```
 
-Structure the tokens hierarchically using `/` in variable names as path separators. Each leaf token has:
-- `$type`: mapped from Figma type (COLOR → "color", FLOAT → "number", STRING → "string", BOOLEAN → "boolean")
-- `$value`: the resolved value (hex for colors, raw for numbers/strings, alias reference format `{path.to.token}` for aliases)
-- `$extensions`: optional Figma-specific metadata (codeSyntax, scopes)
+Carry Figma specifics per token in `$extensions` too — `com.figma.scopes` when not
+`ALL_SCOPES`, and `com.figma.codeSyntax` when set.
 
-Group by collection name as top-level keys.
+## Step 5 — Build theme.css
 
-## Step 5: Build the diff / CHANGELOG.md
+Tailwind v4 is configured in CSS, not `tailwind.config.js`. Each `@theme` namespace
+generates its own utilities, so the whole step is a mechanical rename — no value ever
+changes shape between `tokens.json` and here:
 
-Compare old vs. new token trees and produce a human-readable diff grouped into three sections:
+| Tokens | Namespace | Emits |
+|---|---|---|
+| colour | `--color-*` | `--color-blue-600: #1d5a85;` |
+| spacing, sizing | `--spacing-*` | `--spacing-4: 16px;` |
+| radius | `--radius-*` | `--radius-md: 8px;` |
+| font family | `--font-*` | `--font-sans: "Season Sans";` |
+| font size | `--text-*` | `--text-base: 16px;` |
+| font weight | `--font-weight-*` | `--font-weight-md: 500;` |
+| line height | `--leading-*` | `--leading-normal: 1.5;` |
+| letter spacing | `--tracking-*` | `--tracking-tight: -0.01em;` |
+| shadow | `--shadow-*` | only where a token really is a shadow |
+| blur | `--blur-*` | `--blur-sm: 4px;` |
+| easing | `--ease-*` | `--ease-out: cubic-bezier(0.4, 0, 0.2, 1);` |
+
+```css
+/* Generated from Figma variables — v0.1.4 · 2026-09-08. Re-run /export-tokens to update. */
+@import "tailwindcss";
+
+@theme {
+  --color-blue-600: #1d5a85;
+  --color-text-link: var(--color-blue-600);  /* alias stays an alias */
+  --spacing-4: 16px;
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root {
+  --duration-fast: 150ms;   /* v4 has no duration namespace — a plain property */
+}
+```
+
+**Names carry no prefix of their own**: a `space/4` token becomes `--spacing-4`, giving
+`p-4` — never `--spacing-space-4` and `p-space-4`. **Anything the namespaces don't cover** —
+composite shadows, per-size line-height pairings, a bespoke type scale — is a mapping
+decision owned by whoever owns the codebase: say what didn't map and stop. For a real build
+step rather than a pasted file, point them at [Terrazzo](https://terrazzo.app) or Style
+Dictionary, both of which consume Step 4's `tokens.json` directly.
+
+If the project is still on Tailwind v3, say so and emit the same values as a
+`tailwind.config.js` `theme.extend` — same names, same units, JS object instead of CSS.
+
+## Step 6 — Version and changelog
+
+Compare against Step 1. No previous export → `0.1.0`. No changes → keep the version, say
+everything is current, still emit the files. Otherwise bump: **patch** for any token added,
+changed or removed; **minor** when a whole collection appears or disappears, resetting
+patch; **major** only when the user asks.
+
+Prepend to any existing `CHANGELOG.md`, newest first:
 
 ```markdown
-# Token Export Changelog
+## v0.1.4 — 2026-09-08
 
-## v0.1.4 — 2026-09-03
+### Added (2)
+- `color/background/raised` → #ffffff
 
-### Added (N tokens)
-- `color/background/new-token` → #ff0000
-- `sizing/space/24` → 168
-
-### Changed (N tokens)
+### Changed (1)
 - `typography/fontWeight/md` — 500 → 550
-- `color/text/link` — #1a5a85 → #1d5a85
 
-### Removed (N tokens)
-- `sizing/depth/neg 1600`
+### Removed (1)
+- `sizing/depth/neg-1600`
 ```
 
-If this is the first export, write:
-```markdown
-# Token Export Changelog
+## Step 7 — Deliver
 
-## v0.1.0 — 2026-09-03
-
-Initial export. N tokens across M collections.
-```
-
-Append new entries to the top of any existing CHANGELOG.md (preserve history).
-
-## Step 6: Build tailwind.config.js
-
-Include the version in a header comment:
-```js
-/**
- * Auto-generated from Figma variables — v0.1.4
- * Generated: 2026-09-03
- * Do not edit manually; re-run /export-tokens to update.
- *
- * @type {import('tailwindcss').Config}
- */
-```
-
-Map the tokens to Tailwind theme keys:
-- **colors**: Both primitive colors (stripping "Color/" prefix if present) and semantic color tokens with all aliases resolved to their final hex values
-- **spacing**: From `space/*` variables, formatted as `"space-N": "Xpx"`
-- **borderRadius**: From `radius/*` variables, formatted as `"radius-N": "Xpx"` (9999 for `full`)
-- **borderWidth**: From `stroke/*` variables
-- **blur**: From `blur/*` variables
-- **boxShadow**: Map depth tokens to reasonable CSS shadow values scaled by depth level
-- **fontFamily**: From `fontFamily/*` variables with system fallbacks
-- **fontSize**: From `fontSize/*` variables with calculated lineHeight (1.5 for ≤16px, 1.4 for ≤24px, 1.3 for ≤36px, 1.1 for larger)
-- **fontWeight**: From `fontWeight/*` variables as string values
-- **transitionDuration**: From `duration/*` variables
-- **transitionTimingFunction**: From `easing/*` variables as `cubic-bezier()` values
-
-Use Tailwind-friendly key conventions: kebab-case, `DEFAULT` for base values.
-
-## Step 7: Present results inline
-
-**This is critical.** Paste ALL THREE files inline in the chat as fenced code blocks:
-
-1. `tokens.json` — full file in a ```json block
-2. `tailwind.config.js` — full file in a ```js block
-3. `CHANGELOG.md` — full file in a ```markdown block
-
-Before the code blocks, include a short summary:
-- Version (old → new, or "initial")
-- Total token count and per-collection breakdown
-- Number of tokens added / changed / removed
-- Number excluded by filtering rules
-
-Also write the files to the code directory so they persist for the next run's diff comparison.
+Lead with a short summary, then paste `tokens.json`, `theme.css` and `CHANGELOG.md` in full,
+each in its own fenced block. The summary states: version (old → new, or initial); token
+count and per-collection breakdown; added / changed / removed counts; how many were excluded
+by the rules above; every name sanitised in Step 2; and anything that could not be mapped in
+Step 5.
 
 ---
 
