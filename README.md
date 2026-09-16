@@ -9,7 +9,7 @@ This library contains Figma-agentic skills for design systems to help aid you in
 
 | Skill | What it does |
 |---|---|
-| [`better-accessibility`](/better-accessibility) | Audits a selected frame, component, or multi-screen user flow against WCAG 2.2 AA with measured values, marks up the canvas with annotated fixes, and emits a `.pa11yci` config so the criteria a static design can't prove get verified in CI. |
+| [`better-accessibility`](/better-accessibility) | Audits a selected frame, component, or multi-screen user flow against WCAG 2.2 AA with measured values and marks up the canvas with annotated fixes. Where a finding needs a DOM to settle, it also prints a `.pa11yci` config inline in chat, with every route and selector a design can't know left as a named placeholder and a table saying which layer each one came from. |
 | [`export-tokens`](/export-tokens) | Export all published local variable collections from the current Figma file as a versioned DTCG tokens.json and tailwind.config.js. Detects changes from previous exports, bumps the version, generates a diff summary, and presents all files inline in chat for copy/paste. |
 | [`import-tokens`](/import-tokens) | Import design tokens from a JSON, JS, or config file (tokens.json, tailwind.config.js, Style Dictionary, etc.) into the current Figma file as local variables and styles. Handles both fresh imports and incremental updates to an existing variable system. Adds new tokens, updates changed values, and optionally removes deleted ones. Yay! |
 | [`migrate-library`](/migrate-library) (unfinished WIP) | Relinks a Figma selection's styles, variables, tokens, and component instances onto a different published library, without changing how anything looks. |

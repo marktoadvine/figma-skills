@@ -1,22 +1,31 @@
 ---
 name: better-accessibility
-description: Audits a selected Figma frame, component, or multi-screen user flow against WCAG 2.2 AA using measured values, marks up the canvas with Figma annotation fixes, and emits a pa11y config (.json) so the criteria a static design cannot prove can be separately verified in CI.
+description: Audits a selected Figma frame, component, or multi-screen user flow against WCAG 2.2 AA using measured values, and marks the canvas up with Figma annotations the designer can act on. Where findings need a DOM to settle, it also prints a ready-to-run .pa11yci config inline in chat, with every value a design cannot know left as a named placeholder.
 ---
 
 # Better Accessibility (Figma)
 
 Audit what is selected — a frame, a component, or a whole user flow — against WCAG 2.2 AA
-with measured values, pin the findings onto the canvas as annotations the designer can act
-on, fix what is safely fixable, and hand the rest to [pa11y](https://pa11y.org) as a
-runnable config instead of a paragraph of good intentions.
+with measured values, and pin the findings onto the canvas as annotations the designer can
+act on. **That canvas markup is the deliverable.** The [pa11y](https://pa11y.org) config in
+Step 7 is a secondary output covering only the criteria a static design genuinely cannot
+settle, and it is skipped entirely when there are none.
 
-Two rules govern everything below. **Measure, never eyeball** — every ratio, px size, and
-gap is computed from resolved values, never judged from a screenshot. And **never claim a
-design "passes WCAG"** — a design can only be *contrast-conformant and structurally
-sound*; conformance is a property of the built product.
+Run all scripts through `use_figma`, with `figma-use` in the `skillNames` parameter. Code is
+auto-wrapped in an async context — use top-level `await` and `return` explicitly, since only
+the returned value is visible and `console.log` is not.
 
-The audit will produce a pa11y config in json. Instruct the prompter to
-replace the blank URLs within this file with their actual routes on their live environment, to run pa11y-ci against the codebase, targetting exactly what their Figma designs had failed in.
+Three rules govern everything below.
+
+**Measure, never eyeball** — every ratio, px size, and gap is computed from resolved values,
+never judged from a screenshot. Where a value cannot be resolved, say so; do not estimate.
+
+**Never claim a design "passes WCAG"** — a design can only be *contrast-conformant and
+structurally sound*; conformance is a property of the built product.
+
+**Never invent a selector.** Figma has no DOM, so every class, id, and route in the Step 7
+config is a guess. Guesses are written as named placeholders the user replaces — never as
+plausible-looking values, which run against the wrong element and pass silently.
 
 ## What gets checked where
 
@@ -67,6 +76,7 @@ Where no runner covers it, use the `Figma.` namespace, which is this skill's, no
 | No focus variant designed | `Figma.2_4_7.NoFocusVariant` | nothing automatic |
 | Reflow / fixed width | `Figma.1_4_10.Reflow` | pa11y at 320px |
 | Meaning by colour alone | `Figma.1_4_1.ColorOnly` | nothing |
+| Text on a gradient, image, or video | `Figma.1_4_3.UnmeasurableBackdrop` | `axe` sees the rendered pixel |
 | Body text < 16px, line height < 1.5 | `Figma.1_4_12.TextSpacing` | nothing |
 | Re-asks data from an earlier step | `Figma.3_3_7.RedundantEntry` | nothing — flow-level |
 | Control renamed between steps | `Figma.3_2_4.InconsistentIdentification` | nothing — flow-level |
@@ -117,39 +127,59 @@ const need = (size, weight) => (size >= 24 || (size >= 18.66 && weight >= 700)) 
 const hex = c => '#' + ['r','g','b'].map(k => Math.round(c[k]*255).toString(16).padStart(2,'0')).join('');
 
 // Effective backdrop: walk up, compositing translucent layers until something opaque.
+// Returns { color } when every surface behind the node is a single solid fill, and
+// { unmeasurable } when one is not — a ratio against a gradient or a photo is fiction.
 function backdrop(node) {
   const stack = [];
   for (let p = node.parent; p && p.type !== 'PAGE'; p = p.parent) {
-    const f = Array.isArray(p.fills) && p.fills.find(f => f.visible !== false && f.type === 'SOLID');
-    if (!f) continue;
-    const a = (f.opacity ?? 1) * (p.opacity ?? 1);
-    stack.push({ color: f.color, a });
+    if (!('fills' in p) || !Array.isArray(p.fills)) continue;   // no fills, or figma.mixed
+    const paints = p.fills.filter(f => f.visible !== false);
+    if (!paints.length) continue;
+    // fills render bottom-first, so the last visible paint is the one on top.
+    const top = paints[paints.length - 1];
+    if (paints.length > 1) return { unmeasurable: 'STACKED_FILLS' };
+    if (top.type !== 'SOLID') return { unmeasurable: top.type };
+    const a = (top.opacity ?? 1) * (p.opacity ?? 1);
+    stack.push({ color: top.color, a });
     if (a >= 0.99) break;
   }
   const page = (figma.currentPage.backgrounds || []).find(b => b.type === 'SOLID');
-  return stack.reverse().reduce((bg, l) => mix(l.color, bg, l.a),
-    page ? page.color : { r: 0.96, g: 0.96, b: 0.96 });
+  return { color: stack.reverse().reduce((bg, l) => mix(l.color, bg, l.a),
+    page ? page.color : { r: 0.96, g: 0.96, b: 0.96 }) };
 }
 
-// One text node can hold several fills. Measure per styled segment, not per node.
-const fails = [];
+// `screen` is one entry from Step 1. One text node can hold several fills, so measure
+// per styled segment, not per node.
+const fails = [], notices = [];
 for (const t of screen.query('TEXT')) {
+  const back = backdrop(t);                          // per node, not per segment
+  if (back.unmeasurable) {
+    notices.push({ id: t.id, name: t.name, code: 'Figma.1_4_3.UnmeasurableBackdrop',
+      backdrop: back.unmeasurable });
+    continue;
+  }
+  const bg = back.color;
   for (const s of t.getStyledTextSegments(['fills', 'fontSize', 'fontWeight', 'textCase'])) {
     const f = (s.fills || []).find(p => p.visible !== false && p.type === 'SOLID');
     if (!f) continue;
-    const bg = backdrop(t);
     const fg = mix(f.color, bg, (f.opacity ?? 1) * (t.opacity ?? 1));
     const r = ratio(fg, bg), req = need(s.fontSize, s.fontWeight);
     if (r < req) fails.push({ id: t.id, name: t.name, sample: s.characters.slice(0, 24),
+      code: `WCAG2AA.Principle1.Guideline1_4.1_4_3.${req === 3 ? 'G145' : 'G18'}.Fail`,
       fg: hex(fg), bg: hex(bg), ratio: +r.toFixed(2), need: req });
   }
 }
-return fails;
+return { fails, notices };
 ```
 
 `node.query('TEXT')` beats a `findAll` predicate, and `getStyledTextSegments` is the only
 way to catch a mixed-fill text node — a heading whose last word is a lighter accent fails
 on that word alone, and a node-level read never sees it.
+
+Text on a gradient, an image, or a video has no single backdrop colour, so it produces a
+notice rather than a ratio. Reporting "unmeasurable, needs a human" is the honest result;
+`backdrop()` returning some ancestor's colour instead would be a confident wrong number,
+which is worse than no number.
 
 Then run the remaining passes against the same enumeration:
 
@@ -203,30 +233,54 @@ section-wrapped flows are everywhere. Resolve each finding to its nearest annota
 ancestor and merge anything that lands on the same node:
 
 ```js
-const ANNOTATABLE = new Set(['FRAME','COMPONENT','COMPONENT_SET','INSTANCE','RECTANGLE',
-  'LINE','ELLIPSE','POLYGON','STAR','VECTOR','TEXT','TEXT_PATH']);
-const host = n => { for (let p = n; p; p = p.parent) if (ANNOTATABLE.has(p.type)) return p; return null; };
+const ANNOTATABLE = 'FRAME, COMPONENT, COMPONENT_SET, INSTANCE, RECTANGLE, LINE, ELLIPSE, ' +
+  'POLYGON, STAR, VECTOR, TEXT, TEXT_PATH';
+const canPin = new Set(ANNOTATABLE.split(', '));
+const host = n => { for (let p = n; p; p = p.parent) if (canPin.has(p.type)) return p; return null; };
 
 const cats = await figma.annotations.getAnnotationCategoriesAsync();
 const cat = cats.find(c => c.label === 'Accessibility Review')
   || await figma.annotations.addAnnotationCategoryAsync({ label: 'Accessibility Review', color: 'red' });
 
-// Group findings by host node, then write one pin each. Replaces only our [A11Y] pin.
-const byHost = new Map();
+// The category id — not a text prefix — is what marks a pin as this skill's. It needs no
+// string parsing, and it leaves the designer's own pins and the blue specs below untouched.
+const ours = a => a.categoryId === cat.id;
+
+const nodes = new Map();                       // id -> node: everything this run rewrites
+const lines = new Map();                       // id -> finding lines for that node
 for (const f of findings) {
   const h = host(await figma.getNodeByIdAsync(f.id)); if (!h) continue;
-  (byHost.get(h) ?? byHost.set(h, []).get(h)).push(f.line);
+  nodes.set(h.id, h);
+  if (!lines.has(h.id)) lines.set(h.id, []);
+  lines.get(h.id).push(f.line);
 }
+// Sweep in every node already pinned by this category, including ones with no finding now
+// — without this a fixed issue keeps its pin forever. Restrict the query to annotatable
+// types: reading `.annotations` on a GROUP throws.
+for (const n of screen.query(ANNOTATABLE)) if ((n.annotations || []).some(ours)) nodes.set(n.id, n);
+nodes.set(screen.id, screen);                  // the summary pin lives on the screen frame
+
 const mutated = [];
-for (const [node, lines] of byHost) {
-  const others = (node.annotations || []).filter(a => !/^\[A11Y\]/.test(a.label || ''));
-  const head = `${lines.length} issue${lines.length > 1 ? 's' : ''}`;
-  node.annotations = lines.length ? [...others, { categoryId: cat.id, label: `[A11Y] ${head}`,
-    labelMarkdown: figma.util.normalizeMarkdown([`**${head}**`, ...lines].join('\n\n')) }] : others;
-  mutated.push(node.id);
+for (const [id, node] of nodes) {
+  const keep = (node.annotations || []).filter(a => !ours(a));    // never clobber anyone else's
+  const mine = [], ls = lines.get(id) || [];
+  if (ls.length) {
+    const head = `${ls.length} issue${ls.length > 1 ? 's' : ''}`;
+    mine.push({ categoryId: cat.id,
+      labelMarkdown: figma.util.normalizeMarkdown([`**${head}**`, ...ls].join('\n\n')) });
+  }
+  if (id === screen.id) mine.push({ categoryId: cat.id,
+    labelMarkdown: figma.util.normalizeMarkdown(
+      `**Summary** — ${counts.error} errors · ${counts.warning} warnings · ${counts.notice} notices`) });
+  node.annotations = [...keep, ...mine];       // `mine` empty ⇒ our pin is gone. That is the idempotency.
+  mutated.push(id);
 }
 return { mutatedNodeIds: mutated };
 ```
+
+Write `labelMarkdown` alone rather than `label` and `labelMarkdown` together, and never
+identify a pin by reading `label` back — a pin written with markdown has no plain `label`,
+so a prefix filter on it silently matches nothing and every re-run stacks another pin.
 
 Each line reads plain language first, code second, and always carries the fix:
 
@@ -235,20 +289,28 @@ Text too light — 3.07:1, needs 4.5:1 (1.4.3 · G18.Fail)
 Fix: bind fill to Core/color/text-primary (7.2:1)
 ```
 
-Then put a `[SUMMARY]` pin on **each screen frame** — `error`/`warning`/`notice` counts for
-that screen. A flow's roll-up cannot live on the Section, so print it in chat and in the
-report instead. Re-running is idempotent: anything now passing gets an empty `lines` array
-and its pin disappears, so the canvas never carries a stale count. Finish with
-`await screen.screenshot()` to confirm the markup landed where you think it did.
+The summary pin — `error`/`warning`/`notice` counts for that screen — goes on the screen
+frame in the same pass, so one write per node covers everything this skill puts there. A
+flow's roll-up cannot live on the Section, which takes no annotations, so print that in chat
+and in the report instead.
+
+Re-running is idempotent **only because of the sweep**. Findings alone can never clear a
+pin: a node that now passes produces no finding, so a loop driven by findings never visits
+it and its stale pin survives every re-run. The loop has to visit every node the category
+already marks and rewrite it to an empty list. Finish with `await screen.screenshot()` to
+confirm the markup landed where you think it did.
 
 Categories are shared document state — reuse `Accessibility Review` rather than creating a
 near-duplicate on every run, and keep a second `Accessibility` category (blue) for resolved
 specs that downstream handoff should keep, so fixing an issue doesn't erase the decision.
+Filtering by `categoryId` is what keeps the two apart, and it is why the sweep can safely
+rewrite a node it has never seen before.
 
 ## Step 4 — Report
 
-Save it to a file where the environment allows, and always print it. Group by pa11y type
-so it lines up with a CI run:
+Print the report in chat in full. Figma's agent has no filesystem, so the inline paste is
+the only delivery that always works — where the environment does have one, also write it to
+the code directory. Group by pa11y type so it lines up with a CI run:
 
 ```
 ## Accessibility audit — [selection name]
@@ -300,45 +362,91 @@ auditing only what was drawn.
   tradeoff (larger text, a text-only dark variant, added weight) rather than overriding it.
 - Re-measure changed nodes, re-run Step 3 to clear resolved pins, re-screenshot.
 
-## Step 7 — Emit the pa11y config
+## Step 7 — Hand over the pa11y config
 
-The notices are the point of this step: everything the canvas could not verify becomes
-something the team can actually run. Print it in chat, and where the environment cannot
-write files, place it as a text node beside the flow so it travels with the design.
+### First decide whether there is one to hand over
+
+This step exists for findings the canvas raised but cannot settle — the notices, and the
+warnings that depend on runtime state. **If the audit produced none, skip the config and say
+so in one line.** An audit whose findings are all errors Step 2 measured and Step 6 fixed has
+nothing for CI to carry, and a config emitted anyway is a file the team has to read, edit,
+and wire up before discovering it tests nothing. Emit it when it earns its place:
+
+| Finding | Becomes |
+| --- | --- |
+| Focus / error / disabled variant that only exists at runtime | An `actions` sequence driving the page into that state |
+| Reflow (`Figma.1_4_10.Reflow`) | A second URL entry at `viewport: { width: 320 }` |
+| Alt text, labels, heading level — annotated on canvas, provable only in the DOM | A plain URL entry; `htmlcs` and `axe` check it |
+| Text on a gradient or photo (`Figma.1_4_3.UnmeasurableBackdrop`) | A URL entry — `axe` reads the rendered pixel the canvas could not |
+| Everything the canvas already measured and fixed | Nothing. It is already resolved. |
+
+### Then print it inline, in chat
+
+**Paste the config in chat in full, inside a fenced block**, named `.pa11yci` at the repo
+root — that is the filename `pa11y-ci` looks for with no arguments, and `.pa11yci.json` if
+the team prefers an extension. Figma's agent has no filesystem, so the inline paste is the
+only delivery that always works; where the environment does have one, also write the file.
+Place it as a canvas text node **only if the user asks** — a config that lives in the design
+file is a config nobody runs.
+
+Figma has no DOM, so every route and selector below is a guess. Write guesses as
+`REPLACE_*` placeholders:
 
 ```json
 {
   "defaults": {
     "standard": "WCAG2AA",
     "runners": ["htmlcs", "axe"],
-    "threshold": 0,
-    "hideElements": "#cookie-banner",
-    "ignore": ["notice"]
+    "threshold": 6
   },
   "urls": [
-    { "url": "http://localhost:3000/checkout",
+    {
+      "url": "REPLACE_ORIGIN/checkout",
       "viewport": { "width": 320, "height": 640 },
       "actions": [
-        "set field #email to not-an-email",
-        "click element #submit",
-        "wait for element #email-error to be visible"
-      ] }
+        "set field REPLACE_SELECTOR_email to not-an-email",
+        "click element REPLACE_SELECTOR_submit",
+        "wait for element REPLACE_SELECTOR_email_error to be visible"
+      ]
+    }
   ]
 }
 ```
 
-Derive it from what the audit saw, not from a template:
+### Then print the fill-in table
 
-- Each **variant state** becomes an `actions` sequence, because pa11y only ever sees the
-  default state otherwise. A designed error state is worth nothing in CI until something
-  drives the form into it — and Step 5 already found the screens that do.
-- Each **reflow finding** becomes a second URL entry at `viewport: { width: 320 }`.
-- Each **overlay, banner, or third-party embed** the design excludes becomes
-  `hideElements`, so the report is about the team's own code.
-- Set `threshold` to the current error count, not 0, when adopting on an existing product —
-  a ratchet that can only go down beats a red build everyone learns to ignore.
+One row per placeholder, naming the layer it came from. **This table is what makes the
+config worth emitting from a design audit rather than copying from pa11y's README** — it
+turns "wire this up somehow" into a short list of lookups, each already pointing at the
+element it means:
+
+| Placeholder | Layer it came from | Replace with |
+| --- | --- | --- |
+| `REPLACE_ORIGIN` | — | The origin you test, e.g. `https://staging.example.com` |
+| `REPLACE_SELECTOR_email` | `Checkout / Form / Email input` | That input's selector |
+| `REPLACE_SELECTOR_submit` | `Checkout / Button "Continue"` | That button's selector |
+| `REPLACE_SELECTOR_email_error` | `Checkout / Form / Error — email` | The error message's selector |
+
+A placeholder left in place fails loudly: pa11y reports no element matching
+`REPLACE_SELECTOR_email`, and the run stops. That is the intended behaviour. A guessed
+`#email` that happens to match the wrong field passes silently, and reports green on a form
+nobody tested — which is the failure mode worth designing out.
+
+### Notes on the values
+
+- Set `threshold` to the error count **this audit measured** when adopting on an existing
+  product — a ratchet that can only go down beats a red build everyone learns to ignore. On
+  a greenfield build use `0`. The example says `6` because the Step 4 report said 6 errors.
 - `runners: ["htmlcs", "axe"]` is deliberate: `axe` alone carries `target-size` for 2.5.8,
   and the two disagree often enough that either alone under-reports.
+- Each **overlay, banner, or third-party embed** the design excludes becomes a
+  `hideElements` selector, so the report is about the team's own code — as a placeholder
+  like the rest, never as a plausible `#cookie-banner`.
+- One vocabulary collision, since the config gets read next to the report: this skill's
+  `notice` means *needs a human or a runtime check*, while pa11y's `notice` type is an
+  informational row in its own output. They are unrelated. Do not reach for
+  `"ignore": ["notice"]` — it suppresses pa11y's rows and does nothing to the findings this
+  step just carried across.
 
 Run with `pa11y-ci` (add `--sitemap` for whole-site sweeps), or one page at a time via
 `pa11y --standard WCAG2AA --runner axe --reporter json <url>` when comparing a specific fix
@@ -352,7 +460,12 @@ against its design-time measurement.
 | Designer says they see no pins | Annotations are toggled off: Main menu → View → Annotations. Viewing needs a Full or Dev seat |
 | Ratios all suspiciously high | Backdrop assumed white; the page default is `#F5F5F5` |
 | A heading passes but one word is illegible | Read `getStyledTextSegments`, not `node.fills` — mixed fills hide inside one node |
-| `figma.util.colorToHex` is not a function | It doesn't exist. `figma.util` has `rgb`, `rgba`, `solidPaint`, `normalizeMarkdown` |
+| Re-run stacks a second pin instead of replacing the first | The pin was written with `labelMarkdown` and filtered by reading `label` — filter on `categoryId` |
+| A fixed issue keeps its pin forever | The rewrite loop only visited nodes with findings — sweep every node the category already marks |
+| `node.annotations` throws `no such property` | Read on a `GROUP`, `SECTION`, `BOOLEAN_OPERATION`, or `SLICE` — restrict the query to annotatable types |
+| Contrast measured against the wrong surface | `fills.find(…)` takes the **bottom** paint; the one on top is `fills[fills.length - 1]` |
+| A confident ratio on text over a photo or gradient | The backdrop is not a solid colour — return unmeasurable and raise a notice, never a number |
+| `figma.util.colorToHex` is not a function | It doesn't exist. `figma.util` has `rgb`, `rgba`, `solidPaint`, `normalizeMarkdown`, `getSfSymbolCharacter` |
 | Text mutation throws | Load fonts first: `await figma.loadFontAsync(node.fontName)` |
 | Fill change runs clean, nothing happens | Paints are immutable — clone the array and reassign |
 | `fills` reads as `figma.mixed` | Values differ across children — guard with `Array.isArray` |
