@@ -34,9 +34,10 @@ plausible-looking values, which run against the wrong element and pass silently.
 
 ## What gets checked where
 
-Figma has no DOM, so there is nothing to inspect for ARIA, semantics, or tab order. pa11y
-has a DOM but no design intent, so it cannot tell a decorative rectangle from a missing
-icon. Each covers the other's blind spot, and some things neither can settle:
+Figma has no DOM, so there is nothing to inspect for ARIA, semantics, or tab order. A
+build-time checker has a DOM but no design intent, so it cannot tell a decorative rectangle
+from a missing icon. Each covers the other's blind spot, and some things neither can
+settle:
 
 | This skill checks on canvas | Checkable in the build (pa11y, axe) | Neither — needs a human |
 | --- | --- | --- |
@@ -49,16 +50,20 @@ icon. Each covers the other's blind spot, and some things neither can settle:
 | Reflow via auto layout resizing | Real reflow at `viewport: { width: 320 }` | Zoom + magnification behaviour |
 | Colour-only meaning (1.4.1), non-text contrast (1.4.11) | — no runner covers these | Both, always |
 
-## Severity — pa11y's vocabulary, on purpose
+## Severity
 
-Findings use pa11y's three types rather than a bespoke scale, so a design-time report and
-a CI run can be read side by side and merged without translation.
+Three levels, separated by what the reader has to do about each:
 
-| Type | `typeCode` | Means here |
-| --- | --- | --- |
-| `error` | 1 | A **measured** WCAG 2.2 A/AA failure. Blocking. |
-| `warning` | 2 | Probable failure, or one depending on content or state not visible on canvas. |
-| `notice` | 3 | Needs a human or a runtime check. Becomes a Step 4 handoff entry, not a fix. |
+| Type | Means here |
+| --- | --- |
+| `error` | A **measured** WCAG 2.2 A/AA failure. Blocking. |
+| `warning` | Probable failure, or one depending on content or state not visible on canvas. |
+| `notice` | Needs a human or a runtime check. Becomes a Step 4 handoff entry, not a fix. |
+
+These are the names every accessibility runner uses, so a design-time report and a CI log
+merge without translation if a team ever wants that. The scale earns its place here either
+way — the distinction it draws is *measured vs. probable vs. unprovable from a design*,
+which is the distinction this skill exists to make.
 
 Order findings by user impact, never by how easy they are to fix.
 
@@ -73,8 +78,8 @@ statement can cite.
 
 Alongside it, each finding carries a **code**. Where a build-time runner would emit the same
 defect, use **its** code verbatim — the design finding and the CI failure then collapse into
-one row. Where no runner covers it, use the `Figma.` namespace, which is this skill's, not
-pa11y's.
+one row. Where no runner covers it, use the `Figma.` namespace, which is this skill's and
+belongs to no runner.
 
 | Check | Success criterion | Code | Caught in build by |
 | --- | --- | --- | --- |
@@ -87,7 +92,7 @@ pa11y's.
 | Target size < 24px | [2.5.8 Target Size (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum) · AA | `Figma.2_5_8.TargetSize` | `axe` only |
 | Non-text contrast < 3:1 | [1.4.11 Non-text Contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast) · AA | `Figma.1_4_11.NonTextContrast` | nothing |
 | No focus variant designed | [2.4.7 Focus Visible](https://www.w3.org/WAI/WCAG22/Understanding/focus-visible) · AA | `Figma.2_4_7.NoFocusVariant` | nothing automatic |
-| Reflow / fixed width | [1.4.10 Reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow) · AA | `Figma.1_4_10.Reflow` | pa11y at 320px |
+| Reflow / fixed width | [1.4.10 Reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow) · AA | `Figma.1_4_10.Reflow` | any runner at 320px |
 | Meaning by colour alone | [1.4.1 Use of Color](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color) · A | `Figma.1_4_1.ColorOnly` | nothing |
 | Text on a gradient, image, or video | [1.4.3 Contrast (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum) · AA | `Figma.1_4_3.UnmeasurableBackdrop` | `axe` sees the rendered pixel |
 | Body text < 16px, line height < 1.5 | [1.4.12 Text Spacing](https://www.w3.org/WAI/WCAG22/Understanding/text-spacing) · AA | `Figma.1_4_12.TextSpacing` | nothing |
@@ -363,7 +368,7 @@ rewrite a node it has never seen before.
 
 Print the report in chat in full. Figma's agent has no filesystem, so the inline paste is
 the only delivery that always works — where the environment does have one, also write it to
-the code directory. Group by pa11y type so it lines up with a CI run:
+the code directory. Group by severity:
 
 ```
 ## Accessibility audit — [selection name]
@@ -428,8 +433,8 @@ auditing only what was drawn.
 
 - **Bind to variables, never hardcode.** A pasted hex is a future drift bug. Use
   `search_design_system` before concluding no token exists; if none does, propose one
-  rather than inventing a value. pa11y's contrast message ends with a recommended hex — do
-  one better and recommend the nearest **passing token**, so the fix survives a re-theme.
+  rather than inventing a value. A contrast runner ends its message with a recommended hex —
+  do one better and recommend the nearest **passing token**, so the fix survives a re-theme.
 - **Fix at the highest level that resolves it.** Forty screens failing on one bad Core
   token is one fix plus a blast-radius note, not forty patches.
 - **Never detach an instance to fix it.** Detaching cures the symptom and breaks the
@@ -526,7 +531,7 @@ nobody tested — which is the failure mode worth designing out.
 - Each **overlay, banner, or third-party embed** the design excludes becomes a
   `hideElements` selector, so the report is about the team's own code — as a placeholder
   like the rest, never as a plausible `#cookie-banner`.
-- One vocabulary collision, since the config gets read next to the report: this skill's
+- One name collision, since the config gets read next to the report: this skill's
   `notice` means *needs a human or a runtime check*, while pa11y's `notice` type is an
   informational row in its own output. They are unrelated. Do not reach for
   `"ignore": ["notice"]` — it suppresses pa11y's rows and does nothing to the findings this
