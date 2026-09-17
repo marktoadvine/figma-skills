@@ -1,15 +1,20 @@
 ---
 name: better-accessibility
-description: Audits a selected Figma frame, component, or multi-screen user flow against WCAG 2.2 AA using measured values, and marks the canvas up with Figma annotations the designer can act on. Where findings need a DOM to settle, it also prints a ready-to-run .pa11yci config inline in chat, with every value a design cannot know left as a named placeholder.
+description: Audits a selected Figma frame, component, or multi-screen user flow against WCAG 2.2 AA using measured values, and marks the canvas up with Figma annotations that carry the WCAG criterion and render in Dev Mode. Findings a static design cannot settle are listed in plain language a developer can act on with any tooling; a runnable pa11y config is available on request.
 ---
 
 # Better Accessibility (Figma)
 
 Audit what is selected — a frame, a component, or a whole user flow — against WCAG 2.2 AA
 with measured values, and pin the findings onto the canvas as annotations the designer can
-act on. **That canvas markup is the deliverable.** The [pa11y](https://pa11y.org) config in
-Step 7 is a secondary output covering only the criteria a static design genuinely cannot
-settle, and it is skipped entirely when there are none.
+act on. **That canvas markup is the deliverable** — and because Figma annotations render in
+Dev Mode, it is also the handoff: a developer sees every finding, with its criterion, in the
+file they already have open.
+
+The criteria a static design cannot settle go into a short plain-language list in the report
+(Step 4) that a developer can act on with whatever tooling they already have. A runnable
+[pa11y](https://pa11y.org) config is available as well, but **only when the user asks for
+it** — see Step 7.
 
 Run all scripts through `use_figma`, with `figma-use` in the `skillNames` parameter. Code is
 auto-wrapped in an async context — use top-level `await` and `return` explicitly, since only
@@ -33,7 +38,7 @@ Figma has no DOM, so there is nothing to inspect for ARIA, semantics, or tab ord
 has a DOM but no design intent, so it cannot tell a decorative rectangle from a missing
 icon. Each covers the other's blind spot, and some things neither can settle:
 
-| This skill checks on canvas | pa11y checks in build | Neither — needs a human |
+| This skill checks on canvas | Checkable in the build (pa11y, axe) | Neither — needs a human |
 | --- | --- | --- |
 | Contrast: text, icons, borders, every variant state | Computed contrast on rendered colour | Text over photography or video |
 | Text size, line height, measure, all-caps runs | — | Whether the copy actually reads well |
@@ -53,7 +58,7 @@ a CI run can be read side by side and merged without translation.
 | --- | --- | --- |
 | `error` | 1 | A **measured** WCAG 2.2 A/AA failure. Blocking. |
 | `warning` | 2 | Probable failure, or one depending on content or state not visible on canvas. |
-| `notice` | 3 | Needs a human or a runtime check. Becomes a pa11y config entry, not a fix. |
+| `notice` | 3 | Needs a human or a runtime check. Becomes a Step 4 handoff entry, not a fix. |
 
 Order findings by user impact, never by how easy they are to fix.
 
@@ -373,12 +378,24 @@ the code directory. Group by pa11y type so it lines up with a CI run:
   `WCAG2AA.Principle1.Guideline1_4.1_4_3.G18.Fail`
 
 ### Warnings
-### Notices — carried into .pa11yci
+
+### Needs verification in the build (5)
+- **[1.4.10 Reflow · AA](https://www.w3.org/WAI/WCAG22/Understanding/reflow)** — Checkout / Order summary
+  Fixed 480px wide in the design. Check it reflows at 320px with no horizontal scroll.
+- **[1.1.1 Non-text Content · A](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content)** — Checkout / Hero illustration
+  Marked decorative on canvas. Check it ships as `alt=""` and is not announced.
 ```
 
 Lead each entry with the linked criterion and keep the runner code on its own line beneath.
 The criterion is what a reader acts on; the code is what a CI log matches against, and
 putting it first buries the finding under a string most readers cannot parse.
+
+**The last section is the handoff, and for most audits it is the only one needed.** It
+carries the findings the canvas raised but cannot settle, written so a developer can act on
+them with whatever tooling their team already runs. Each entry names the criterion, the
+layer, what the design shows, and the one thing to check in the build — and **never a
+selector, a route, or a tool**, because the design file knows none of the three. A designer
+can paste this straight into a ticket without editing it, which is the test it has to pass.
 
 Itemise every element measured, passes included. An audit that lists four failures out of
 forty elements and an audit that only looked at four are indistinguishable unless the
@@ -421,15 +438,23 @@ auditing only what was drawn.
   tradeoff (larger text, a text-only dark variant, added weight) rather than overriding it.
 - Re-measure changed nodes, re-run Step 3 to clear resolved pins, re-screenshot.
 
-## Step 7 — Hand over the pa11y config
+## Step 7 — The pa11y config, on request
 
-### First decide whether there is one to hand over
+### Do not emit this unless the user asks
 
-This step exists for findings the canvas raised but cannot settle — the notices, and the
-warnings that depend on runtime state. **If the audit produced none, skip the config and say
-so in one line.** An audit whose findings are all errors Step 2 measured and Step 6 fixed has
-nothing for CI to carry, and a config emitted anyway is a file the team has to read, edit,
-and wire up before discovering it tests nothing. Emit it when it earns its place:
+The Step 4 handoff list already tells a developer what to check, in a form that needs no
+selectors and assumes no tooling. This step exists for the narrower case where a team wants
+those checks to **re-run on every commit** — which is the one thing a canvas annotation
+genuinely cannot do, since a pin is a point-in-time note and CI is not.
+
+Offer it once, in a single line at the end of the report, and only when both are true: the
+handoff list is non-empty, **and** the user has mentioned a codebase, a repo, or CI. A
+designer auditing a concept has no use for it, and the config nobody asked for is what makes
+this step feel like homework rather than a deliverable.
+
+When they do ask, the rest of this step applies — starting with whether the findings justify
+one at all. An audit whose findings are all errors Step 2 measured and Step 6 fixed has
+nothing for CI to carry; say so rather than emitting a file that tests nothing:
 
 | Finding | Becomes |
 | --- | --- |
@@ -439,7 +464,7 @@ and wire up before discovering it tests nothing. Emit it when it earns its place
 | Text on a gradient or photo (`Figma.1_4_3.UnmeasurableBackdrop`) | A URL entry — `axe` reads the rendered pixel the canvas could not |
 | Everything the canvas already measured and fixed | Nothing. It is already resolved. |
 
-### Then print it inline, in chat
+### Print it inline, in chat
 
 **Paste the config in chat in full, inside a fenced block**, named `.pa11yci` at the repo
 root — that is the filename `pa11y-ci` looks for with no arguments, and `.pa11yci.json` if
