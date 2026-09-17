@@ -57,29 +57,71 @@ a CI run can be read side by side and merged without translation.
 
 Order findings by user impact, never by how easy they are to fix.
 
-## Issue codes
+## Issue codes and WCAG references
 
-Every finding carries a code. Where a build-time runner would emit the same defect, use
-**its** code verbatim — the design finding and the CI failure then collapse into one row.
-Where no runner covers it, use the `Figma.` namespace, which is this skill's, not pa11y's.
+**Every finding carries its success criterion — number, official name, level, and a link to
+the W3C Understanding page — wherever it appears: the canvas pin, the chat report, and the
+config comments alike.** A finding without one is not actionable: "text too light" is an
+opinion, and `G18.Fail` is a string only a runner recognises, but "1.4.3 Contrast (Minimum),
+Level AA" is the thing a designer can escalate, a developer can look up, and a compliance
+statement can cite.
 
-| Check | Code | Caught in build by |
-| --- | --- | --- |
-| Text contrast, normal | `WCAG2AA.Principle1.Guideline1_4.1_4_3.G18.Fail` | `htmlcs`, `axe` |
-| Text contrast, large | `WCAG2AA.Principle1.Guideline1_4.1_4_3.G145.Fail` | `htmlcs`, `axe` |
-| Image missing alt | `WCAG2AA.Principle1.Guideline1_1.1_1_1.H37` | `htmlcs`, `axe` |
-| Input without label | `WCAG2AA.Principle1.Guideline1_3.1_3_1.F68` | `htmlcs`, `axe` |
-| Empty heading | `WCAG2AA.Principle1.Guideline1_3.1_3_1.H42.2` | `htmlcs` |
-| Link purpose unclear | `WCAG2AA.Principle2.Guideline2_4.2_4_4.H77,H78,H79,H80,H81` | `htmlcs` |
-| Target size < 24px | `Figma.2_5_8.TargetSize` | `axe` only |
-| Non-text contrast < 3:1 | `Figma.1_4_11.NonTextContrast` | nothing |
-| No focus variant designed | `Figma.2_4_7.NoFocusVariant` | nothing automatic |
-| Reflow / fixed width | `Figma.1_4_10.Reflow` | pa11y at 320px |
-| Meaning by colour alone | `Figma.1_4_1.ColorOnly` | nothing |
-| Text on a gradient, image, or video | `Figma.1_4_3.UnmeasurableBackdrop` | `axe` sees the rendered pixel |
-| Body text < 16px, line height < 1.5 | `Figma.1_4_12.TextSpacing` | nothing |
-| Re-asks data from an earlier step | `Figma.3_3_7.RedundantEntry` | nothing — flow-level |
-| Control renamed between steps | `Figma.3_2_4.InconsistentIdentification` | nothing — flow-level |
+Alongside it, each finding carries a **code**. Where a build-time runner would emit the same
+defect, use **its** code verbatim — the design finding and the CI failure then collapse into
+one row. Where no runner covers it, use the `Figma.` namespace, which is this skill's, not
+pa11y's.
+
+| Check | Success criterion | Code | Caught in build by |
+| --- | --- | --- | --- |
+| Text contrast, normal | [1.4.3 Contrast (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum) · AA | `WCAG2AA.Principle1.Guideline1_4.1_4_3.G18.Fail` | `htmlcs`, `axe` |
+| Text contrast, large | [1.4.3 Contrast (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum) · AA | `WCAG2AA.Principle1.Guideline1_4.1_4_3.G145.Fail` | `htmlcs`, `axe` |
+| Image missing alt | [1.1.1 Non-text Content](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content) · A | `WCAG2AA.Principle1.Guideline1_1.1_1_1.H37` | `htmlcs`, `axe` |
+| Input without label | [1.3.1 Info and Relationships](https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships) · A | `WCAG2AA.Principle1.Guideline1_3.1_3_1.F68` | `htmlcs`, `axe` |
+| Empty heading | [1.3.1 Info and Relationships](https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships) · A | `WCAG2AA.Principle1.Guideline1_3.1_3_1.H42.2` | `htmlcs` |
+| Link purpose unclear | [2.4.4 Link Purpose (In Context)](https://www.w3.org/WAI/WCAG22/Understanding/link-purpose-in-context) · A | `WCAG2AA.Principle2.Guideline2_4.2_4_4.H77,H78,H79,H80,H81` | `htmlcs` |
+| Target size < 24px | [2.5.8 Target Size (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum) · AA | `Figma.2_5_8.TargetSize` | `axe` only |
+| Non-text contrast < 3:1 | [1.4.11 Non-text Contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast) · AA | `Figma.1_4_11.NonTextContrast` | nothing |
+| No focus variant designed | [2.4.7 Focus Visible](https://www.w3.org/WAI/WCAG22/Understanding/focus-visible) · AA | `Figma.2_4_7.NoFocusVariant` | nothing automatic |
+| Reflow / fixed width | [1.4.10 Reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow) · AA | `Figma.1_4_10.Reflow` | pa11y at 320px |
+| Meaning by colour alone | [1.4.1 Use of Color](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color) · A | `Figma.1_4_1.ColorOnly` | nothing |
+| Text on a gradient, image, or video | [1.4.3 Contrast (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum) · AA | `Figma.1_4_3.UnmeasurableBackdrop` | `axe` sees the rendered pixel |
+| Body text < 16px, line height < 1.5 | [1.4.12 Text Spacing](https://www.w3.org/WAI/WCAG22/Understanding/text-spacing) · AA | `Figma.1_4_12.TextSpacing` | nothing |
+| Re-asks data from an earlier step | [3.3.7 Redundant Entry](https://www.w3.org/WAI/WCAG22/Understanding/redundant-entry) · A | `Figma.3_3_7.RedundantEntry` | nothing — flow-level |
+| Control renamed between steps | [3.2.4 Consistent Identification](https://www.w3.org/WAI/WCAG22/Understanding/consistent-identification) · AA | `Figma.3_2_4.InconsistentIdentification` | nothing — flow-level |
+
+Never retype a criterion name from memory — build every finding line from this map, which
+also covers the flow-level criteria in Step 5:
+
+```js
+// [official name, level, Understanding-page slug] — WCAG 2.2.
+const SC = {
+  '1.1.1':  ['Non-text Content', 'A', 'non-text-content'],
+  '1.3.1':  ['Info and Relationships', 'A', 'info-and-relationships'],
+  '1.4.1':  ['Use of Color', 'A', 'use-of-color'],
+  '1.4.3':  ['Contrast (Minimum)', 'AA', 'contrast-minimum'],
+  '1.4.10': ['Reflow', 'AA', 'reflow'],
+  '1.4.11': ['Non-text Contrast', 'AA', 'non-text-contrast'],
+  '1.4.12': ['Text Spacing', 'AA', 'text-spacing'],
+  '2.4.4':  ['Link Purpose (In Context)', 'A', 'link-purpose-in-context'],
+  '2.4.7':  ['Focus Visible', 'AA', 'focus-visible'],
+  '2.4.11': ['Focus Not Obscured (Minimum)', 'AA', 'focus-not-obscured-minimum'],
+  '2.5.8':  ['Target Size (Minimum)', 'AA', 'target-size-minimum'],
+  '3.2.3':  ['Consistent Navigation', 'AA', 'consistent-navigation'],
+  '3.2.4':  ['Consistent Identification', 'AA', 'consistent-identification'],
+  '3.3.1':  ['Error Identification', 'A', 'error-identification'],
+  '3.3.3':  ['Error Suggestion', 'AA', 'error-suggestion'],
+  '3.3.4':  ['Error Prevention (Legal, Financial, Data)', 'AA', 'error-prevention-legal-financial-data'],
+  '3.3.7':  ['Redundant Entry', 'A', 'redundant-entry'],
+};
+// Plain text for a canvas pin; a markdown link for the chat report.
+const ref     = sc => `${sc} ${SC[sc][0]} · ${SC[sc][1]}`;
+const refLink = sc => `[${ref(sc)}](https://www.w3.org/WAI/WCAG22/Understanding/${SC[sc][2]})`;
+```
+
+Pins get `ref()` and the report gets `refLink()`: a pin is read on canvas at a glance, where
+a long URL crowds out the finding, and the report is markdown in chat where the link
+resolves. If a finding needs a criterion this map does not list, add it here first — an
+invented criterion name is worse than none, because it survives into a compliance document.
 
 ## Step 1 — Resolve the scope
 
@@ -282,12 +324,18 @@ Write `labelMarkdown` alone rather than `label` and `labelMarkdown` together, an
 identify a pin by reading `label` back — a pin written with markdown has no plain `label`,
 so a prefix filter on it silently matches nothing and every re-run stacks another pin.
 
-Each line reads plain language first, code second, and always carries the fix:
+Each line reads plain language first, then the criterion, then the fix — three lines, in
+that order, every time. Plain language first because the designer reads it first; the
+criterion second because it is what turns a complaint into a citation; the fix last because
+it is what they actually do next:
 
 ```
-Text too light — 3.07:1, needs 4.5:1 (1.4.3 · G18.Fail)
+Text too light — 3.07:1, needs 4.5:1
+1.4.3 Contrast (Minimum) · AA · G18.Fail
 Fix: bind fill to Core/color/text-primary (7.2:1)
 ```
+
+The middle line is `ref(sc)` from the map above, never a name typed from memory.
 
 The summary pin — `error`/`warning`/`notice` counts for that screen — goes on the screen
 frame in the same pass, so one write per node covers everything this skill puts there. A
@@ -319,12 +367,18 @@ the code directory. Group by pa11y type so it lines up with a CI run:
 **Summary:** 6 errors · 3 warnings · 5 notices
 
 ### Errors
-- `WCAG2AA.Principle1.Guideline1_4.1_4_3.G18.Fail` — Checkout / Button "Continue"
+- **[1.4.3 Contrast (Minimum) · AA](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum)**
+  — Checkout / Button "Continue"
   Measured 3.07:1 on #FFFFFF, needs 4.5:1. Fix: bind `Core/color/text-on-brand` (7.2:1).
+  `WCAG2AA.Principle1.Guideline1_4.1_4_3.G18.Fail`
 
 ### Warnings
 ### Notices — carried into .pa11yci
 ```
+
+Lead each entry with the linked criterion and keep the runner code on its own line beneath.
+The criterion is what a reader acts on; the code is what a CI log matches against, and
+putting it first buries the finding under a string most readers cannot parse.
 
 Itemise every element measured, passes included. An audit that lists four failures out of
 forty elements and an audit that only looked at four are indistinguishable unless the
@@ -335,15 +389,20 @@ count is stated.
 Only when the selection is a flow. These criteria are invisible on any single screen,
 which is the whole reason to audit a flow as one object:
 
-- **3.3.7 Redundant Entry (A).** Does a later step re-ask for something already given?
-- **3.2.4 Consistent Identification (AA).** The same control keeps the same label and icon
-  across steps — "Continue" must not become "Next" on screen 3.
-- **3.2.3 Consistent Navigation (AA).** Shared navigation keeps its relative order.
-- **3.3.1 / 3.3.3 Error paths.** The flow includes error states, with text and an icon, and
-  a suggested correction — not a red border alone.
-- **3.3.4 Error Prevention (AA).** The last irreversible step is confirmable or reversible.
-- **2.4.11 Focus Not Obscured (AA).** Sticky headers and bottom bars don't cover the
-  element that would hold focus.
+- **[3.3.7 Redundant Entry · A](https://www.w3.org/WAI/WCAG22/Understanding/redundant-entry).** Does a later step re-ask for
+  something already given?
+- **[3.2.4 Consistent Identification · AA](https://www.w3.org/WAI/WCAG22/Understanding/consistent-identification).** The same
+  control keeps the same label and icon across steps — "Continue" must not become "Next" on
+  screen 3.
+- **[3.2.3 Consistent Navigation · AA](https://www.w3.org/WAI/WCAG22/Understanding/consistent-navigation).** Shared navigation
+  keeps its relative order.
+- **[3.3.1 Error Identification · A](https://www.w3.org/WAI/WCAG22/Understanding/error-identification)** and
+  **[3.3.3 Error Suggestion · AA](https://www.w3.org/WAI/WCAG22/Understanding/error-suggestion).** The flow includes error states,
+  with text and an icon, and a suggested correction — not a red border alone.
+- **[3.3.4 Error Prevention (Legal, Financial, Data) · AA](https://www.w3.org/WAI/WCAG22/Understanding/error-prevention-legal-financial-data).**
+  The last irreversible step is confirmable or reversible.
+- **[2.4.11 Focus Not Obscured (Minimum) · AA](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum).** Sticky
+  headers and bottom bars don't cover the element that would hold focus.
 
 A designed happy path with no error state is itself a finding — report the gap rather than
 auditing only what was drawn.
